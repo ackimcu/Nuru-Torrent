@@ -15,9 +15,14 @@
                 <i class="fas fa-play-circle"></i>
                 <h1>Nuru Torrent Streamer</h1>
             </div>
-            <div class="status-indicator">
-                <span class="status-dot" id="connectionStatus"></span>
-                <span id="connectionText">Connecting...</span>
+            <div class="header-actions">
+                <div class="status-indicator">
+                    <span class="status-dot" id="connectionStatus"></span>
+                    <span id="connectionText">Connecting...</span>
+                </div>
+                <button id="settingsBtn" class="btn btn-icon" title="Settings">
+                    <i class="fas fa-cog"></i>
+                </button>
             </div>
         </header>
 
@@ -57,29 +62,103 @@
 
             <!-- Video Player Section -->
             <section class="video-section" id="videoSection" style="display: none;">
-                <div class="video-container">
+                <div class="custom-video-player" id="customVideoPlayer">
+                    <!-- Video Element -->
                     <video 
                         id="videoPlayer" 
-                        controls 
                         preload="metadata"
+                        controls
                         poster="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwIiBoZWlnaHQ9IjQ1MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMzMzIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIyNCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk5vIFZpZGVvIFNlbGVjdGVkPC90ZXh0Pjwvc3ZnPg=="
                     >
                         Your browser does not support the video tag.
                     </video>
                     
+                    <!-- Loading Overlay -->
                     <div class="video-overlay" id="videoOverlay">
                         <div class="loading-spinner">
                             <i class="fas fa-spinner fa-spin"></i>
                             <p>Loading video...</p>
                         </div>
                     </div>
+                    
+                    <!-- Custom Controls -->
+                    <div class="custom-controls" id="customControls">
+                        <!-- Progress Bar -->
+                        <div class="progress-container">
+                            <div class="progress-bar" id="progressBar">
+                                <div class="progress-buffer" id="progressBuffer"></div>
+                                <div class="progress-fill" id="progressFill"></div>
+                                <div class="progress-handle" id="progressHandle"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Control Buttons -->
+                        <div class="controls-row">
+                            <div class="controls-left">
+                                <button class="control-btn" id="playPauseBtn" title="Play/Pause">
+                                    <i class="fas fa-play"></i>
+                                </button>
+                                <button class="control-btn" id="muteBtn" title="Mute/Unmute">
+                                    <i class="fas fa-volume-up"></i>
+                                </button>
+                                <div class="volume-container">
+                                    <div class="volume-slider" id="volumeSlider">
+                                        <div class="volume-fill" id="volumeFill"></div>
+                                        <div class="volume-handle" id="volumeHandle"></div>
+                                    </div>
+                                </div>
+                                <div class="time-display">
+                                    <span id="currentTime">0:00</span>
+                                    <span class="time-separator">/</span>
+                                    <span id="totalTime">0:00</span>
+                                </div>
+                            </div>
+                            
+                            <div class="controls-right">
+                                <!-- Caption Controls -->
+                                <div class="caption-controls-inline" id="captionControlsInline" style="display: none;">
+                                    <div class="caption-dropdown">
+                                        <button class="control-btn" id="captionsBtn" title="Toggle Captions">
+                                            <i class="fas fa-closed-captioning"></i>
+                                        </button>
+                                        <div class="caption-dropdown-menu" id="captionDropdownMenu">
+                                            <div class="caption-dropdown-item" data-value="">
+                                                <i class="fas fa-times"></i>
+                                                No Captions
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button class="control-btn" id="fullscreenBtn" title="Fullscreen">
+                                    <i class="fas fa-expand"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Caption Overlay -->
+                    <div class="caption-overlay" id="captionOverlay">
+                        <div class="caption-text" id="captionText"></div>
+                    </div>
                 </div>
                 
                 <div class="video-info">
                     <h3 id="videoTitle">No video selected</h3>
                     <div class="video-stats">
-                        <span id="videoSize">-</span>
-                        <span id="videoProgress">-</span>
+                        <div class="video-stats-info">
+                            <span id="videoSize">-</span>
+                            <span id="videoResolution">-</span>
+                            <span id="videoProgress">-</span>
+                            <div class="quality-indicator">
+                                <div class="quality-circle" id="qualityCircle"></div>
+                            </div>
+                            <div class="priority-indicator" style="display: none;">
+                                <i class="fas fa-bolt" id="priorityIcon" title="Prioritized"></i>
+                            </div>
+                        </div>
+                        <button class="btn btn-small btn-danger" id="closeVideoBtn" title="Close Video">
+                            <i class="fas fa-times"></i> Close
+                        </button>
                     </div>
                 </div>
             </section>
@@ -111,6 +190,9 @@
                                 <button class="btn btn-small" id="refreshFiles">
                                     <i class="fas fa-sync-alt"></i> Refresh
                                 </button>
+                                <button class="btn btn-small btn-danger" id="closeTorrentBtn" title="Close Torrent">
+                                    <i class="fas fa-trash"></i> Close Torrent
+                                </button>
                             </div>
                         </div>
                         <div class="file-list" id="fileList">
@@ -124,20 +206,12 @@
                 </div>
             </section>
 
-            <!-- Torrent List Section -->
-            <section class="torrent-list-section">
-                <div class="torrent-list-header">
-                    <h3>Active Torrents</h3>
-                    <button class="btn btn-small btn-primary" id="openFileManager">
+            <!-- File Manager Button Section -->
+            <section class="file-manager-button-section">
+                <div class="file-manager-button-container">
+                    <button class="btn btn-primary" id="openFileManager">
                         <i class="fas fa-folder-open"></i> File Manager
                     </button>
-                </div>
-                <div class="torrent-list" id="torrentList">
-                    <div class="empty-state">
-                        <i class="fas fa-cloud-download-alt"></i>
-                        <p>No active torrents</p>
-                        <small>Add a magnet link to start streaming</small>
-                    </div>
                 </div>
             </section>
         </main>
@@ -146,6 +220,55 @@
         <footer class="footer">
             <p>&copy; 2024 Nuru Torrent Streamer - Stream torrents without downloading</p>
         </footer>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-cog"></i> Settings</h2>
+                <button id="closeSettingsBtn" class="btn btn-icon">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h3>Server Management</h3>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <h4>Restart Server</h4>
+                            <p>Stop and restart the Nuru Torrent server. This will disconnect all clients temporarily.</p>
+                        </div>
+                        <button id="restartServerBtn" class="btn btn-warning">
+                            <i class="fas fa-redo"></i>
+                            Restart Server
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h3>System Information</h3>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">Server Status:</span>
+                            <span class="info-value" id="serverStatus">Running</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Uptime:</span>
+                            <span class="info-value" id="serverUptime">--</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Active Torrents:</span>
+                            <span class="info-value" id="activeTorrentsCount">0</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Connected Clients:</span>
+                            <span class="info-value" id="connectedClientsCount">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Toast Notifications -->

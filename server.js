@@ -130,11 +130,13 @@ function getFileType(filename) {
   const audioExts = ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a'];
   const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
   const documentExts = ['pdf', 'txt', 'doc', 'docx', 'rtf'];
+  const captionExts = ['srt', 'vtt', 'ass', 'ssa', 'sub', 'idx'];
   
   if (videoExts.includes(ext)) return 'video';
   if (audioExts.includes(ext)) return 'audio';
   if (imageExts.includes(ext)) return 'image';
   if (documentExts.includes(ext)) return 'document';
+  if (captionExts.includes(ext)) return 'caption';
   return 'other';
 }
 
@@ -233,13 +235,63 @@ function calculateBufferHealth(torrent, videoFile) {
   let downloadedPieces = 0;
   let totalPieces = endPiece - startPiece + 1;
   
+  // Debug logging (minimal)
+  if (downloadedPieces === 0 && torrent.progress > 0.5) {
+    console.log(`Buffer calculation issue for ${videoFile.name}: ${downloadedPieces}/${totalPieces} pieces`);
+  }
+  
+  // Use torrent progress as the primary source of truth for buffer health
+  // This ensures consistency between overall progress and buffer health
+  const estimatedDownloadedPieces = Math.floor(torrent.progress * totalPieces);
+  
+  // Try to detect actual downloaded pieces, but cap it at the torrent progress
+  let detectedDownloadedPieces = 0;
+  
   for (let i = startPiece; i <= endPiece; i++) {
-    if (i < torrent.pieces.length && torrent.pieces[i] && torrent.pieces[i].done) {
-      downloadedPieces++;
+    if (i < torrent.pieces.length && torrent.pieces[i]) {
+      // Method 1: Check if piece is done
+      if (torrent.pieces[i].done) {
+        detectedDownloadedPieces++;
+        continue;
+      }
+      
+      // Method 2: Check if piece is downloaded
+      if (torrent.pieces[i].downloaded) {
+        detectedDownloadedPieces++;
+        continue;
+      }
+      
+      // Method 3: Check if piece exists and has data
+      if (torrent.pieces[i].length > 0) {
+        detectedDownloadedPieces++;
+        continue;
+      }
+      
+      // Method 4: Check piece status using different properties
+      if (torrent.pieces[i].status === 'done' || torrent.pieces[i].status === 'downloaded') {
+        detectedDownloadedPieces++;
+        continue;
+      }
     }
   }
   
-  return totalPieces > 0 ? downloadedPieces / totalPieces : 0;
+  // Use the minimum of detected pieces and estimated pieces to prevent over-reporting
+  downloadedPieces = Math.min(detectedDownloadedPieces, estimatedDownloadedPieces);
+  
+  // If no pieces detected but torrent has progress, use the estimated value
+  if (detectedDownloadedPieces === 0 && torrent.progress > 0) {
+    downloadedPieces = estimatedDownloadedPieces;
+    console.log(`Using torrent progress estimation: ${downloadedPieces} pieces from ${torrent.progress} progress`);
+  }
+  
+  const bufferHealth = totalPieces > 0 ? downloadedPieces / totalPieces : 0;
+  
+  // Debug logging (minimal)
+  if (bufferHealth > 0.9 && torrent.progress < 0.1) {
+    console.log(`Buffer health inconsistency: ${(bufferHealth * 100).toFixed(1)}% buffer vs ${(torrent.progress * 100).toFixed(1)}% progress`);
+  }
+  
+  return bufferHealth;
 }
 
 // Adaptive streaming quality based on connection speed
@@ -293,6 +345,11 @@ app.post('/api/torrent', (req, res) => {
         file.name.match(/\.(mp4|avi|mkv|mov|wmv|flv|webm|m4v)$/i)
       );
 
+      // Find caption files
+      const captionFiles = torrent.files.filter(file => 
+        file.name.match(/\.(srt|vtt|ass|ssa|sub|idx)$/i)
+      );
+
       if (videoFiles.length > 0) {
         // Prioritize the largest video file
         const mainVideoFile = videoFiles.reduce((prev, current) => 
@@ -319,6 +376,7 @@ app.post('/api/torrent', (req, res) => {
           torrent,
           mainVideoFile,
           stream,
+          captionFiles,
           name: torrent.name,
           progress: 0,
           downloadSpeed: 0,
@@ -343,6 +401,11 @@ app.post('/api/torrent', (req, res) => {
             name: mainVideoFile.name,
             length: mainVideoFile.length
           },
+          captionFiles: captionFiles.map(file => ({
+            name: file.name,
+            length: file.length,
+            type: getFileType(file.name)
+          })),
           files: torrent.files.map(file => ({
             name: file.name,
             length: file.length,
@@ -373,6 +436,11 @@ app.post('/api/torrent', (req, res) => {
         
         // Calculate adaptive quality
         const adaptiveQuality = getAdaptiveQuality(torrent.downloadSpeed, torrentData.mainVideoFile.length);
+        
+        // Debug logging for progress updates (minimal)
+        if (torrent.progress > 0.95) {
+          console.log(`Torrent completed: ${torrent.name}`);
+        }
         
         io.emit('torrentProgress', {
           infoHash: torrent.infoHash,
@@ -611,6 +679,61 @@ app.get('/api/stream/:infoHash/file/:fileIndex', (req, res) => {
   }
 });
 
+// API endpoint to get caption files for a torrent
+app.get('/api/torrent/:infoHash/captions', (req, res) => {
+  const { infoHash } = req.params;
+  const torrentData = activeTorrents.get(infoHash);
+  
+  if (!torrentData) {
+    return res.status(404).json({ error: 'Torrent not found' });
+  }
+
+  res.json({ 
+    captions: torrentData.captionFiles || [],
+    hasCaptions: (torrentData.captionFiles && torrentData.captionFiles.length > 0)
+  });
+});
+
+// API endpoint to stream caption file
+app.get('/api/stream/:infoHash/caption/:captionIndex', (req, res) => {
+  const { infoHash, captionIndex } = req.params;
+  const torrentData = activeTorrents.get(infoHash);
+  
+  if (!torrentData) {
+    return res.status(404).json({ error: 'Torrent not found' });
+  }
+
+  const captionIndexNum = parseInt(captionIndex);
+  if (isNaN(captionIndexNum) || captionIndexNum < 0 || !torrentData.captionFiles || captionIndexNum >= torrentData.captionFiles.length) {
+    return res.status(404).json({ error: 'Caption file not found' });
+  }
+
+  const captionFile = torrentData.captionFiles[captionIndexNum];
+  
+  // Handle client disconnect
+  req.on('close', () => {
+    console.log('Client disconnected from caption stream');
+  });
+  
+  res.writeHead(200, {
+    'Content-Type': getContentType(captionFile.name),
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Range',
+    'Access-Control-Expose-Headers': 'Content-Length, Content-Range'
+  });
+  
+  const stream = captionFile.createReadStream();
+  
+  stream.on('error', (err) => {
+    console.error('Caption stream error:', err);
+    if (!res.headersSent) {
+      res.status(500).end();
+    }
+  });
+  
+  stream.pipe(res);
+});
+
 // Helper function to get content type
 function getContentType(filename) {
   const ext = filename.toLowerCase().split('.').pop();
@@ -639,7 +762,13 @@ function getContentType(filename) {
     'txt': 'text/plain',
     'doc': 'application/msword',
     'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'rtf': 'application/rtf'
+    'rtf': 'application/rtf',
+    'srt': 'text/plain',
+    'vtt': 'text/vtt',
+    'ass': 'text/x-ass',
+    'ssa': 'text/x-ssa',
+    'sub': 'text/x-sub',
+    'idx': 'text/x-idx'
   };
   
   return contentTypes[ext] || 'application/octet-stream';
@@ -653,11 +782,87 @@ app.delete('/api/torrent/:infoHash', (req, res) => {
   if (torrentData) {
     client.remove(torrentData.torrent);
     activeTorrents.delete(infoHash);
+    
+    // Notify all connected clients that torrent was removed
+    io.emit('torrentRemoved', { infoHash });
+    
     res.json({ success: true, message: 'Torrent removed' });
   } else {
     res.status(404).json({ error: 'Torrent not found' });
   }
 });
+
+// API endpoint for health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    activeTorrents: activeTorrents.size
+  });
+});
+
+// API endpoint to restart server
+app.post('/api/restart', (req, res) => {
+  console.log('Server restart requested by client');
+  
+  // Notify all clients about restart
+  io.emit('serverRestarting', { message: 'Server is restarting...' });
+  
+  res.json({ success: true, message: 'Server restart initiated' });
+  
+  // Give time for response to be sent, then restart
+  setTimeout(() => {
+    console.log('Restarting server...');
+    
+    // Execute the restart script
+    const { spawn } = require('child_process');
+    const path = require('path');
+    
+    // Start the restart script
+    const restartProcess = spawn('node', ['restart-server.js'], {
+      cwd: __dirname,
+      stdio: 'inherit',
+      detached: true
+    });
+    
+    // Detach the restart process so it continues after this process exits
+    restartProcess.unref();
+    
+    console.log('Restart script launched, exiting...');
+    
+    // Exit the current process
+    process.exit(0);
+  }, 1000);
+});
+
+// Periodic buffer health updates
+setInterval(() => {
+  activeTorrents.forEach((torrentData, infoHash) => {
+    const { torrent } = torrentData;
+    if (torrent && torrentData.mainVideoFile) {
+      // Update buffer health
+      torrentData.bufferHealth = calculateBufferHealth(torrent, torrentData.mainVideoFile);
+      
+      // Emit progress update if there are connected clients
+      if (io.engine.clientsCount > 0) {
+        io.emit('torrentProgress', {
+          infoHash: torrent.infoHash,
+          progress: torrent.progress,
+          downloadSpeed: torrent.downloadSpeed,
+          uploadSpeed: torrent.uploadSpeed,
+          peers: torrent.numPeers,
+          seeders: torrent.numSeeders,
+          leechers: torrent.numLeechers,
+          bufferHealth: torrentData.bufferHealth,
+          connectionHealth: torrentData.connectionHealth || 0,
+          adaptiveQuality: getAdaptiveQuality(torrent.downloadSpeed, torrentData.mainVideoFile.length),
+          isLowSeeder: torrent.numSeeders < 3
+        });
+      }
+    }
+  });
+}, 2000); // Update every 2 seconds
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
