@@ -56,8 +56,8 @@ const client = new WebTorrent({
   // Increase buffer size for smoother playback
   bufferSize: 64 * 1024 * 1024, // 64MB buffer
   
-  // Set download directory for better file management
-  downloadPath: path.join(__dirname, 'downloads')
+  // Set download directory to hidden temp folder for streaming only
+  downloadPath: path.join(require('os').tmpdir(), '.nuru-torrent-temp')
 });
 
 // Store active torrents
@@ -343,8 +343,8 @@ app.post('/api/torrent', (req, res) => {
       // Enable piece prioritization
       prioritize: true,
       
-      // Set download path for this specific torrent
-      path: path.join(__dirname, 'downloads', 'torrent-' + Date.now())
+      // Set download path for this specific torrent (hidden temp folder)
+      path: path.join(require('os').tmpdir(), '.nuru-torrent-temp', 'torrent-' + Date.now())
     }, (torrent) => {
       console.log('Torrent added:', torrent.name);
       console.log('Torrent download path:', torrent.path);
@@ -896,18 +896,18 @@ async function deleteTorrentFiles(torrent) {
       console.log(`⚠️ Torrent directory not found: ${torrentPath}`);
     }
 
-    // Also try to delete from WebTorrent's default download directory
-    const defaultDownloadPath = path.join(process.cwd(), 'downloads', torrent.infoHash);
-    if (fs.existsSync(defaultDownloadPath)) {
-      console.log(`🗑️ Deleting from default download path: ${defaultDownloadPath}`);
-      await deleteDirectory(defaultDownloadPath);
+    // Also try to delete from WebTorrent's temp directory
+    const webtorrentTempPath = path.join(require('os').tmpdir(), 'webtorrent', torrent.infoHash);
+    if (fs.existsSync(webtorrentTempPath)) {
+      console.log(`🗑️ Deleting from WebTorrent temp path: ${webtorrentTempPath}`);
+      await deleteDirectory(webtorrentTempPath);
     }
 
-    // Try to delete from system temp directory (WebTorrent sometimes uses this)
-    const tempPath = path.join(require('os').tmpdir(), 'webtorrent', torrent.infoHash);
-    if (fs.existsSync(tempPath)) {
-      console.log(`🗑️ Deleting from temp path: ${tempPath}`);
-      await deleteDirectory(tempPath);
+    // Try to delete from our hidden temp directory
+    const hiddenTempPath = path.join(require('os').tmpdir(), '.nuru-torrent-temp', torrent.infoHash);
+    if (fs.existsSync(hiddenTempPath)) {
+      console.log(`🗑️ Deleting from hidden temp path: ${hiddenTempPath}`);
+      await deleteDirectory(hiddenTempPath);
     }
 
     console.log(`✅ File system cleanup completed for torrent: ${torrent.name}`);
@@ -1137,8 +1137,55 @@ io.on('connection', (socket) => {
   });
 });
 
+// Function to clean up temp directory on server shutdown
+function cleanupTempDirectory() {
+  const tempDir = path.join(require('os').tmpdir(), '.nuru-torrent-temp');
+  
+  try {
+    if (fs.existsSync(tempDir)) {
+      console.log(`🧹 Cleaning up temp directory: ${tempDir}`);
+      
+      // Remove all files and subdirectories
+      const files = fs.readdirSync(tempDir);
+      for (const file of files) {
+        const filePath = path.join(tempDir, file);
+        const stat = fs.statSync(filePath);
+        
+        if (stat.isDirectory()) {
+          deleteDirectory(filePath);
+        } else {
+          fs.unlinkSync(filePath);
+        }
+      }
+      
+      // Remove the temp directory itself
+      fs.rmdirSync(tempDir);
+      console.log(`✅ Temp directory cleaned up: ${tempDir}`);
+    }
+  } catch (error) {
+    console.error(`❌ Error cleaning up temp directory:`, error);
+  }
+}
+
+// Clean up temp directory on server startup
+cleanupTempDirectory();
+
+// Clean up temp directory on server shutdown
+process.on('SIGINT', () => {
+  console.log('\n🛑 Server shutting down...');
+  cleanupTempDirectory();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n🛑 Server shutting down...');
+  cleanupTempDirectory();
+  process.exit(0);
+});
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Nuru Torrent Streamer running on port ${PORT}`);
   console.log(`Open http://localhost:${PORT} in your browser`);
+  console.log(`📁 Temp files stored in: ${path.join(require('os').tmpdir(), '.nuru-torrent-temp')}`);
 });
