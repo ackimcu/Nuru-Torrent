@@ -1088,6 +1088,44 @@ app.post('/api/restart', (req, res) => {
   }, 1000);
 });
 
+// API endpoint to shutdown server
+app.post('/api/shutdown', (req, res) => {
+  console.log('Server shutdown requested by client');
+  
+  // Notify all clients about shutdown
+  io.emit('serverShuttingDown', { message: 'Server is shutting down...' });
+  
+  res.json({ success: true, message: 'Server shutdown initiated' });
+  
+  // Give time for response to be sent, then shutdown
+  setTimeout(() => {
+    console.log('Shutting down server...');
+    
+    // Gracefully close all torrents
+    if (torrents) {
+      console.log('Stopping all active torrents...');
+      torrents.forEach(torrent => {
+        try {
+          torrent.destroy();
+        } catch (error) {
+          console.error('Error destroying torrent:', error);
+        }
+      });
+    }
+    
+    // Close all socket connections
+    console.log('Closing all socket connections...');
+    io.close();
+    
+    // Close the HTTP server
+    console.log('Closing HTTP server...');
+    server.close(() => {
+      console.log('Server has been gracefully shut down');
+      process.exit(0);
+    });
+  }, 1000);
+});
+
 // Periodic buffer health updates
 setInterval(() => {
   activeTorrents.forEach((torrentData, infoHash) => {
@@ -1138,28 +1176,15 @@ io.on('connection', (socket) => {
 });
 
 // Function to clean up temp directory on server shutdown
-function cleanupTempDirectory() {
+async function cleanupTempDirectory() {
   const tempDir = path.join(require('os').tmpdir(), '.nuru-torrent-temp');
   
   try {
     if (fs.existsSync(tempDir)) {
       console.log(`🧹 Cleaning up temp directory: ${tempDir}`);
       
-      // Remove all files and subdirectories
-      const files = fs.readdirSync(tempDir);
-      for (const file of files) {
-        const filePath = path.join(tempDir, file);
-        const stat = fs.statSync(filePath);
-        
-        if (stat.isDirectory()) {
-          deleteDirectory(filePath);
-        } else {
-          fs.unlinkSync(filePath);
-        }
-      }
-      
-      // Remove the temp directory itself
-      fs.rmdirSync(tempDir);
+      // Use recursive deletion instead of manual file-by-file deletion
+      await deleteDirectory(tempDir);
       console.log(`✅ Temp directory cleaned up: ${tempDir}`);
     }
   } catch (error) {
@@ -1168,19 +1193,17 @@ function cleanupTempDirectory() {
 }
 
 // Clean up temp directory on server startup
-cleanupTempDirectory();
+cleanupTempDirectory().catch(console.error);
 
 // Clean up temp directory on server shutdown
 process.on('SIGINT', () => {
   console.log('\n🛑 Server shutting down...');
-  cleanupTempDirectory();
-  process.exit(0);
+  cleanupTempDirectory().then(() => process.exit(0)).catch(() => process.exit(1));
 });
 
 process.on('SIGTERM', () => {
   console.log('\n🛑 Server shutting down...');
-  cleanupTempDirectory();
-  process.exit(0);
+  cleanupTempDirectory().then(() => process.exit(0)).catch(() => process.exit(1));
 });
 
 const PORT = process.env.PORT || 3000;

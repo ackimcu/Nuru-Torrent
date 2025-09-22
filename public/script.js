@@ -31,6 +31,11 @@ class CustomVideoPlayer {
         this.isDragging = false;
         this.isVolumeDragging = false;
         
+        // Fullscreen control hiding
+        this.controlsHideTimer = null;
+        this.controlsHideDelay = 1500; // 1.5 seconds
+        this.isControlsVisible = false;
+        
         // Initialize volume
         this.video.volume = this.volume;
         this.updateVolumeDisplay();
@@ -76,24 +81,29 @@ class CustomVideoPlayer {
         this.playPauseBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             this.togglePlayPause();
+            this.resetControlsTimer();
         });
         this.muteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             this.toggleMute();
+            this.resetControlsTimer();
         });
         this.fullscreenBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             this.toggleFullscreen();
+            this.resetControlsTimer();
         });
         this.captionsBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             this.toggleCaptions();
+            this.resetControlsTimer();
         });
         
         // Progress bar events
         this.progressBar.addEventListener('click', (e) => {
             e.stopPropagation();
             this.seekTo(e);
+            this.resetControlsTimer();
         });
         this.progressBar.addEventListener('mousedown', (e) => {
             e.stopPropagation();
@@ -106,6 +116,7 @@ class CustomVideoPlayer {
         this.volumeSlider.addEventListener('click', (e) => {
             e.stopPropagation();
             this.setVolume(e);
+            this.resetControlsTimer();
         });
         this.volumeSlider.addEventListener('mousedown', (e) => {
             e.stopPropagation();
@@ -116,8 +127,9 @@ class CustomVideoPlayer {
         
         // Player events
         this.player.addEventListener('click', () => this.togglePlayPause());
-        this.player.addEventListener('mouseenter', () => this.showControls());
-        this.player.addEventListener('mouseleave', () => this.hideControls());
+        this.player.addEventListener('mouseenter', () => this.onMouseEnter());
+        this.player.addEventListener('mouseleave', () => this.onMouseLeave());
+        this.player.addEventListener('mousemove', () => this.onMouseMove());
         
         // Prevent controls from triggering player click
         this.controls.addEventListener('click', (e) => {
@@ -295,8 +307,18 @@ class CustomVideoPlayer {
         
         if (isFullscreen) {
             this.player.classList.add('fullscreen');
+            // Disable hover behavior in fullscreen by adding a class
+            this.player.classList.add('fullscreen-no-hover');
+            // Show controls initially in fullscreen and start timer
+            this.showControls();
         } else {
             this.player.classList.remove('fullscreen');
+            this.player.classList.remove('fullscreen-no-hover');
+            // Clear timer when exiting fullscreen
+            if (this.controlsHideTimer) {
+                clearTimeout(this.controlsHideTimer);
+                this.controlsHideTimer = null;
+            }
         }
         
         // Restore playback state after fullscreen transition
@@ -341,10 +363,12 @@ class CustomVideoPlayer {
     onDrag(e) {
         if (!this.isDragging) return;
         this.seekTo(e);
+        this.resetControlsTimer();
     }
     
     stopDragging() {
         this.isDragging = false;
+        this.resetControlsTimer();
     }
     
     setVolume(e) {
@@ -384,10 +408,12 @@ class CustomVideoPlayer {
         }
         
         this.updateVolumeDisplay();
+        this.resetControlsTimer();
     }
     
     stopVolumeDragging() {
         this.isVolumeDragging = false;
+        this.resetControlsTimer();
     }
     
     updateProgress() {
@@ -433,10 +459,69 @@ class CustomVideoPlayer {
     
     showControls() {
         this.controls.classList.add('show');
+        this.controls.style.opacity = '1';
+        this.isControlsVisible = true;
+        
+        // In fullscreen mode, set a timer to hide controls
+        if (this.isFullscreen) {
+            this.startControlsHideTimer();
+        }
     }
     
     hideControls() {
         this.controls.classList.remove('show');
+        this.controls.style.opacity = '0';
+        this.isControlsVisible = false;
+        
+        // Clear any existing timer
+        if (this.controlsHideTimer) {
+            clearTimeout(this.controlsHideTimer);
+            this.controlsHideTimer = null;
+        }
+    }
+    
+    onMouseEnter() {
+        // In normal mode, show controls on hover
+        if (!this.isFullscreen) {
+            this.showControls();
+        }
+    }
+    
+    onMouseLeave() {
+        // In normal mode, hide controls when mouse leaves
+        if (!this.isFullscreen) {
+            this.hideControls();
+        }
+    }
+    
+    onMouseMove() {
+        // Only handle mouse movement in fullscreen mode
+        if (this.isFullscreen) {
+            this.showControls();
+        }
+    }
+    
+    startControlsHideTimer() {
+        // Clear any existing timer
+        if (this.controlsHideTimer) {
+            clearTimeout(this.controlsHideTimer);
+        }
+        
+        // Set new timer to hide controls
+        this.controlsHideTimer = setTimeout(() => {
+            if (this.isFullscreen && this.isControlsVisible) {
+                this.controls.classList.remove('show');
+                this.controls.style.opacity = '0';
+                this.isControlsVisible = false;
+            }
+        }, this.controlsHideDelay);
+    }
+    
+    resetControlsTimer() {
+        // Only reset timer in fullscreen mode
+        if (this.isFullscreen && this.isControlsVisible) {
+            this.startControlsHideTimer();
+        }
     }
     
     onKeyDown(e) {
@@ -537,6 +622,7 @@ const settingsBtn = document.getElementById('settingsBtn');
 const settingsModal = document.getElementById('settingsModal');
 const closeSettingsBtn = document.getElementById('closeSettingsBtn');
 const restartServerBtn = document.getElementById('restartServerBtn');
+const shutdownServerBtn = document.getElementById('shutdownServerBtn');
 const serverStatus = document.getElementById('serverStatus');
 const serverUptime = document.getElementById('serverUptime');
 const activeTorrentsCount = document.getElementById('activeTorrentsCount');
@@ -699,6 +785,12 @@ function initializeSocket() {
         showToast(data.message, 'warning');
         updateConnectionStatus(false);
     });
+    
+    socket.on('serverShuttingDown', (data) => {
+        console.log('Server shutting down:', data.message);
+        showToast(data.message, 'warning');
+        updateConnectionStatus(false);
+    });
 }
 
 // Event listeners
@@ -733,6 +825,7 @@ function setupEventListeners() {
     settingsBtn.addEventListener('click', openSettingsModal);
     closeSettingsBtn.addEventListener('click', closeSettingsModal);
     restartServerBtn.addEventListener('click', restartServer);
+    shutdownServerBtn.addEventListener('click', shutdownServer);
     
     // Close modal when clicking outside
     settingsModal.addEventListener('click', (e) => {
@@ -1747,6 +1840,62 @@ async function restartServer() {
         showToast('Failed to restart server', 'error');
         restartServerBtn.disabled = false;
         restartServerBtn.innerHTML = '<i class="fas fa-redo"></i> Restart Server';
+    }
+}
+
+// Server Shutdown Function
+async function shutdownServer() {
+    if (!confirm('⚠️ CRITICAL WARNING ⚠️\n\nAre you sure you want to shut down the server?\n\nThis will:\n• Stop all active torrents\n• Disconnect all clients\n• Close all connections\n• Completely shut down the server\n\nThis action cannot be undone!\n\nClick OK to proceed with shutdown.')) {
+        return;
+    }
+    
+    shutdownServerBtn.disabled = true;
+    shutdownServerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Shutting down...';
+    
+    try {
+        const response = await fetch('/api/shutdown', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('Server shutdown initiated. Goodbye!', 'info');
+            
+            // Show shutdown message and close the page after a delay
+            setTimeout(() => {
+                document.body.innerHTML = `
+                    <div style="
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                        height: 100vh;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        text-align: center;
+                    ">
+                        <i class="fas fa-power-off" style="font-size: 4rem; margin-bottom: 2rem; opacity: 0.8;"></i>
+                        <h1 style="font-size: 2.5rem; margin-bottom: 1rem;">Server Shut Down</h1>
+                        <p style="font-size: 1.2rem; opacity: 0.9;">The Nuru Torrent server has been gracefully shut down.</p>
+                        <p style="font-size: 1rem; opacity: 0.7; margin-top: 1rem;">You can close this page now.</p>
+                    </div>
+                `;
+            }, 2000);
+        } else {
+            showToast(`Error: ${result.error}`, 'error');
+            shutdownServerBtn.disabled = false;
+            shutdownServerBtn.innerHTML = '<i class="fas fa-power-off"></i> Shut Down Server';
+        }
+    } catch (error) {
+        console.error('Error shutting down server:', error);
+        showToast('Failed to shut down server', 'error');
+        shutdownServerBtn.disabled = false;
+        shutdownServerBtn.innerHTML = '<i class="fas fa-power-off"></i> Shut Down Server';
     }
 }
 

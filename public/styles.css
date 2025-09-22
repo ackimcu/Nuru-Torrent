@@ -309,8 +309,29 @@ body {
     opacity: 1;
 }
 
+/* In fullscreen mode, let JavaScript handle control visibility */
+.custom-video-player.fullscreen-no-hover .custom-controls {
+    opacity: 0;
+}
+
+.custom-video-player:fullscreen .custom-controls {
+    opacity: 0;
+}
+
+.custom-video-player:-webkit-full-screen .custom-controls {
+    opacity: 0;
+}
+
 .custom-controls.show {
     opacity: 1;
+}
+
+/* Ensure show class works in fullscreen mode with higher specificity */
+.custom-video-player.fullscreen-no-hover .custom-controls.show,
+.custom-video-player:fullscreen .custom-controls.show,
+.custom-video-player:-webkit-full-screen .custom-controls.show,
+.custom-video-player.fullscreen .custom-controls.show {
+    opacity: 1 !important;
 }
 
 /* Progress Bar */
@@ -1451,6 +1472,33 @@ body {
 }
 
 .btn-warning:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, #ff6b6b 0%, #e74c3c 100%);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.btn-danger:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(255, 107, 107, 0.4);
+}
+
+.btn-danger:disabled {
     opacity: 0.6;
     cursor: not-allowed;
     transform: none;
