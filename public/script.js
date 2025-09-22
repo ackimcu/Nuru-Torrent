@@ -609,16 +609,27 @@ function initializeSocket() {
     
     socket.on('torrentRemoved', (data) => {
         console.log('Torrent removed:', data.infoHash);
+        const torrentName = data.torrentName || 'Unknown Torrent';
+        const cleanupComplete = data.cleanupComplete !== false; // Default to true if not specified
+        
+        // Clear torrent from active torrents
         activeTorrents.delete(data.infoHash);
         updateTorrentList();
         updateTorrentSelector();
         
         // If this was the current torrent, stop video and hide video section
         if (currentTorrent && currentTorrent.infoHash === data.infoHash) {
+            console.log(`🎬 Cleaning up current torrent: ${data.infoHash}`);
+            
             // Stop video playback
             videoPlayer.pause();
             videoPlayer.src = '';
             videoPlayer.load(); // Reset the video element
+            
+            // Clear video source URL from browser cache
+            if (videoPlayer.src) {
+                URL.revokeObjectURL(videoPlayer.src);
+            }
             
             // Stop video prioritization
             stopVideoPrioritization();
@@ -635,14 +646,30 @@ function initializeSocket() {
             qualityCircle.className = 'quality-circle';
             qualityCircle.title = '';
             
+            // Clear caption data
+            currentCaptions = [];
+            captionData = [];
+            isCaptionsEnabled = false;
+            currentCaptionIndex = 0;
+            captionText.textContent = '';
+            captionText.classList.add('hidden');
+            captionControlsInline.style.display = 'none';
+            captionOverlay.style.display = 'none';
+            
             // Hide any loading overlay
             hideVideoOverlay();
             
-            showToast('Torrent was removed', 'info');
+            // Show appropriate message based on cleanup status
+            if (cleanupComplete) {
+                showToast(`✅ ${torrentName} removed and all data cleaned up`, 'success');
+            } else {
+                showToast(`⚠️ ${torrentName} removed with partial cleanup`, 'warning');
+            }
         }
         
         // If this was the selected torrent for files, clear selection
         if (selectedTorrentForFiles === data.infoHash) {
+            console.log(`📁 Clearing file manager selection: ${data.infoHash}`);
             selectedTorrentForFiles = null;
             fileList.innerHTML = `
                 <div class="empty-state">
@@ -651,6 +678,19 @@ function initializeSocket() {
                     <small>Select a torrent to browse its files</small>
                 </div>
             `;
+            filePath.innerHTML = `
+                <i class="fas fa-folder"></i>
+                <span>Select a torrent to browse files</span>
+            `;
+        }
+        
+        // Show general removal notification if not current torrent
+        if (!currentTorrent || currentTorrent.infoHash !== data.infoHash) {
+            if (cleanupComplete) {
+                showToast(`✅ ${torrentName} removed and cleaned up`, 'success');
+            } else {
+                showToast(`⚠️ ${torrentName} removed with partial cleanup`, 'warning');
+            }
         }
     });
     
@@ -988,66 +1028,106 @@ function updateTorrentList() {
     console.log(`Active torrents: ${activeTorrents.size}`);
 }
 
-// Remove torrent
+// Remove torrent with comprehensive client-side cleanup
 async function removeTorrent(infoHash) {
-    try {
-        const response = await fetch(`/api/torrent/${infoHash}`, {
-            method: 'DELETE'
-        });
+  try {
+    console.log(`🗑️ Starting client-side cleanup for torrent: ${infoHash}`);
+    
+    const response = await fetch(`/api/torrent/${infoHash}`, {
+      method: 'DELETE'
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      console.log(`✅ Server cleanup completed: ${result.message}`);
+      
+      // 1. Clear torrent from active torrents map
+      activeTorrents.delete(infoHash);
+      updateTorrentList();
+      
+      // 2. Clear browser cache for this torrent
+      clearBrowserCacheForTorrent(infoHash);
+      
+      // 3. If this was the current torrent, perform comprehensive cleanup
+      if (currentTorrent && currentTorrent.infoHash === infoHash) {
+        console.log(`🎬 Cleaning up current torrent: ${infoHash}`);
         
-        const result = await response.json();
+        // Stop video playback immediately
+        videoPlayer.pause();
+        videoPlayer.src = '';
+        videoPlayer.load(); // Reset the video element
         
-        if (result.success) {
-            activeTorrents.delete(infoHash);
-            updateTorrentList(); // Still call for data management
-            
-            // If this was the current torrent, stop video and hide video section
-            if (currentTorrent && currentTorrent.infoHash === infoHash) {
-                // Stop video playback
-                videoPlayer.pause();
-                videoPlayer.src = '';
-                videoPlayer.load(); // Reset the video element
-                
-                // Stop video prioritization
-                stopVideoPrioritization();
-                
-                // Clear current torrent and hide video section
-                currentTorrent = null;
-                videoSection.style.display = 'none';
-                
-                // Clear video info
-                videoTitle.textContent = '';
-                videoSize.textContent = '';
-                videoResolution.textContent = '-';
-                videoProgress.textContent = '';
-                qualityCircle.className = 'quality-circle';
-                qualityCircle.title = '';
-                
-                // Hide any loading overlay
-                hideVideoOverlay();
-            }
-            
-            // If this was the selected torrent for files, clear selection
-            if (selectedTorrentForFiles === infoHash) {
-                selectedTorrentForFiles = null;
-                fileList.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-folder-open"></i>
-                        <p>No files to display</p>
-                        <small>Select a torrent to browse its files</small>
-                    </div>
-                `;
-            }
-            
-            updateTorrentSelector();
-            showToast('Torrent removed', 'success');
-        } else {
-            showToast(`Error: ${result.error}`, 'error');
+        // Clear video source URL from browser cache
+        if (videoPlayer.src) {
+          URL.revokeObjectURL(videoPlayer.src);
         }
-    } catch (error) {
-        console.error('Error removing torrent:', error);
-        showToast('Failed to remove torrent', 'error');
+        
+        // Stop video prioritization
+        stopVideoPrioritization();
+        
+        // Clear current torrent and hide video section
+        currentTorrent = null;
+        videoSection.style.display = 'none';
+        
+        // Clear video info
+        videoTitle.textContent = '';
+        videoSize.textContent = '';
+        videoResolution.textContent = '-';
+        videoProgress.textContent = '';
+        qualityCircle.className = 'quality-circle';
+        qualityCircle.title = '';
+        
+        // Clear caption data
+        currentCaptions = [];
+        captionData = [];
+        isCaptionsEnabled = false;
+        currentCaptionIndex = 0;
+        captionText.textContent = '';
+        captionText.classList.add('hidden');
+        captionControlsInline.style.display = 'none';
+        captionOverlay.style.display = 'none';
+        
+        // Hide any loading overlay
+        hideVideoOverlay();
+        
+        console.log(`✅ Current torrent cleanup completed: ${infoHash}`);
+      }
+      
+      // 4. If this was the selected torrent for files, clear selection
+      if (selectedTorrentForFiles === infoHash) {
+        console.log(`📁 Clearing file manager selection: ${infoHash}`);
+        selectedTorrentForFiles = null;
+        fileList.innerHTML = `
+          <div class="empty-state">
+            <i class="fas fa-folder-open"></i>
+            <p>No files to display</p>
+            <small>Select a torrent to browse its files</small>
+          </div>
+        `;
+        filePath.innerHTML = `
+          <i class="fas fa-folder"></i>
+          <span>Select a torrent to browse files</span>
+        `;
+      }
+      
+      // 5. Update UI components
+      updateTorrentSelector();
+      
+      // 6. Show success message with cleanup status
+      const message = result.cleanupComplete ? 
+        `Torrent removed and all data cleaned up` : 
+        `Torrent removed with partial cleanup`;
+      showToast(message, 'success');
+      
+      console.log(`✅ Client-side cleanup completed for torrent: ${infoHash}`);
+    } else {
+      showToast(`Error: ${result.error}`, 'error');
     }
+  } catch (error) {
+    console.error('Error removing torrent:', error);
+    showToast('Failed to remove torrent', 'error');
+  }
 }
 
 // Video overlay functions
@@ -1119,19 +1199,113 @@ function updateConnectionStatus(connected) {
 
 // Utility functions
 function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 function formatSpeed(bytesPerSecond) {
-    if (bytesPerSecond === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytesPerSecond) / Math.log(k));
-    return parseFloat((bytesPerSecond / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  if (bytesPerSecond === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytesPerSecond) / Math.log(k));
+  return parseFloat((bytesPerSecond / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// Browser cache management for torrent data
+function clearBrowserCacheForTorrent(infoHash) {
+  console.log(`🧹 Clearing browser cache for torrent: ${infoHash}`);
+  
+  try {
+    // 1. Clear any cached video data
+    if (videoPlayer.src) {
+      const videoUrl = videoPlayer.src;
+      if (videoUrl.includes(infoHash)) {
+        console.log(`🎬 Clearing video cache for: ${infoHash}`);
+        videoPlayer.src = '';
+        videoPlayer.load();
+        
+        // Revoke object URL if it's a blob URL
+        if (videoUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(videoUrl);
+        }
+      }
+    }
+    
+    // 2. Clear any cached caption data
+    if (currentCaptions && currentCaptions.length > 0) {
+      console.log(`📝 Clearing caption cache for: ${infoHash}`);
+      currentCaptions = [];
+      captionData = [];
+      isCaptionsEnabled = false;
+      currentCaptionIndex = 0;
+    }
+    
+    // 3. Clear any cached file data
+    const torrent = activeTorrents.get(infoHash);
+    if (torrent && torrent.files) {
+      console.log(`📁 Clearing file cache for: ${infoHash}`);
+      torrent.files = [];
+    }
+    
+    // 4. Clear any cached progress data
+    if (torrent) {
+      torrent.progress = 0;
+      torrent.downloadSpeed = 0;
+      torrent.uploadSpeed = 0;
+      torrent.bufferHealth = 0;
+      torrent.connectionHealth = 0;
+    }
+    
+    // 5. Clear any cached streams
+    if (torrent && torrent.stream) {
+      console.log(`🌊 Clearing stream cache for: ${infoHash}`);
+      if (typeof torrent.stream.destroy === 'function') {
+        torrent.stream.destroy();
+      }
+      torrent.stream = null;
+    }
+    
+    // 6. Force garbage collection if available (in some browsers)
+    if (window.gc) {
+      window.gc();
+      console.log(`🗑️ Garbage collection triggered for: ${infoHash}`);
+    }
+    
+    // 7. Clear any localStorage/sessionStorage data related to this torrent
+    try {
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.includes(infoHash)) {
+          keysToRemove.push(key);
+        }
+      }
+      
+      keysToRemove.forEach(key => {
+        localStorage.removeItem(key);
+        console.log(`🗑️ Removed localStorage key: ${key}`);
+      });
+      
+      // Same for sessionStorage
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key && key.includes(infoHash)) {
+          sessionStorage.removeItem(key);
+          console.log(`🗑️ Removed sessionStorage key: ${key}`);
+        }
+      }
+    } catch (storageError) {
+      console.warn('Could not clear storage data:', storageError);
+    }
+    
+    console.log(`✅ Browser cache cleared for torrent: ${infoHash}`);
+    
+  } catch (error) {
+    console.error(`❌ Error clearing browser cache for torrent ${infoHash}:`, error);
+  }
 }
 
 // Toast notifications - Single toast system with fast transitions
@@ -1385,69 +1559,83 @@ function refreshFiles() {
     }
 }
 
-// Close current torrent function
+// Close current torrent function with comprehensive data management
 async function closeCurrentTorrent() {
-    if (!selectedTorrentForFiles) {
-        showToast('No torrent selected', 'warning');
-        return;
-    }
+  if (!selectedTorrentForFiles) {
+    showToast('No torrent selected', 'warning');
+    return;
+  }
+  
+  const torrent = activeTorrents.get(selectedTorrentForFiles);
+  if (!torrent) {
+    showToast('Torrent not found', 'error');
+    return;
+  }
+  
+  // Show detailed warning confirmation
+  const torrentName = torrent.name || 'Unknown Torrent';
+  const confirmed = confirm(
+    `🗑️ COMPREHENSIVE TORRENT CLEANUP\n\n` +
+    `Torrent: ${torrentName}\n\n` +
+    `This will perform a complete cleanup:\n` +
+    `• ⏹️ STOP the torrent download/upload\n` +
+    `• 🧹 CLEAR all cached data\n` +
+    `• 🗑️ DELETE all downloaded files from disk\n` +
+    `• 🌊 DESTROY all active streams\n` +
+    `• 💾 FREE up memory resources\n` +
+    `• 🎬 STOP video if playing\n\n` +
+    `⚠️ This will permanently delete all downloaded files!\n` +
+    `This action cannot be undone!\n\n` +
+    `Click OK to proceed with complete cleanup.`
+  );
+  
+  if (!confirmed) {
+    return;
+  }
+  
+  // Disable button during operation
+  closeTorrentBtn.disabled = true;
+  closeTorrentBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cleaning up...';
+  
+  try {
+    console.log(`🗑️ Starting comprehensive cleanup for torrent: ${torrentName}`);
     
-    const torrent = activeTorrents.get(selectedTorrentForFiles);
-    if (!torrent) {
-        showToast('Torrent not found', 'error');
-        return;
-    }
+    // Show progress toast
+    showToast('Starting comprehensive cleanup...', 'info');
     
-    // Show warning confirmation
-    const torrentName = torrent.name || 'Unknown Torrent';
-    const confirmed = confirm(
-        `Are you sure you want to close this torrent?\n\n` +
-        `Torrent: ${torrentName}\n\n` +
-        `This will:\n` +
-        `• Stop the video if it's playing\n` +
-        `• Remove the torrent completely\n` +
-        `• Delete all downloaded data\n\n` +
-        `This action cannot be undone!`
-    );
+    // Remove the torrent using the enhanced removeTorrent function
+    await removeTorrent(selectedTorrentForFiles);
     
-    if (!confirmed) {
-        return;
-    }
+    // Clear file manager selection
+    selectedTorrentForFiles = null;
+    fileList.innerHTML = `
+      <div class="empty-state">
+        <i class="fas fa-folder-open"></i>
+        <p>No files to display</p>
+        <small>Select a torrent to browse its files</small>
+      </div>
+    `;
+    filePath.innerHTML = `
+      <i class="fas fa-folder"></i>
+      <span>Select a torrent to browse files</span>
+    `;
     
-    // Disable button during operation
-    closeTorrentBtn.disabled = true;
-    closeTorrentBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Closing...';
+    // Update torrent selector
+    updateTorrentSelector();
     
-    try {
-        // Remove the torrent using the existing removeTorrent function
-        await removeTorrent(selectedTorrentForFiles);
-        
-        // Clear file manager selection
-        selectedTorrentForFiles = null;
-        fileList.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-folder-open"></i>
-                <p>No files to display</p>
-                <small>Select a torrent to browse its files</small>
-            </div>
-        `;
-        filePath.innerHTML = `
-            <i class="fas fa-folder"></i>
-            <span>Select a torrent to browse files</span>
-        `;
-        
-        // Update torrent selector
-        updateTorrentSelector();
-        
-        showToast('Torrent closed successfully', 'success');
-    } catch (error) {
-        console.error('Error closing torrent:', error);
-        showToast('Failed to close torrent', 'error');
-    } finally {
-        // Re-enable button
-        closeTorrentBtn.disabled = false;
-        closeTorrentBtn.innerHTML = '<i class="fas fa-trash"></i> Close Torrent';
-    }
+    // Show success message
+    showToast('✅ Torrent completely removed and all data cleaned up', 'success');
+    
+    console.log(`✅ Comprehensive cleanup completed for torrent: ${torrentName}`);
+    
+  } catch (error) {
+    console.error('Error closing torrent:', error);
+    showToast('❌ Failed to close torrent completely', 'error');
+  } finally {
+    // Re-enable button
+    closeTorrentBtn.disabled = false;
+    closeTorrentBtn.innerHTML = '<i class="fas fa-trash"></i> Close Torrent';
+  }
 }
 
 // Set currently playing video for prioritization

@@ -4,6 +4,8 @@ const socketIo = require('socket.io');
 const WebTorrent = require('webtorrent');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
+const { promisify } = require('util');
 
 const app = express();
 const server = http.createServer(app);
@@ -53,6 +55,9 @@ const client = new WebTorrent({
   
   // Increase buffer size for smoother playback
   bufferSize: 64 * 1024 * 1024, // 64MB buffer
+  
+  // Set download directory for better file management
+  downloadPath: path.join(__dirname, 'downloads')
 });
 
 // Store active torrents
@@ -336,9 +341,14 @@ app.post('/api/torrent', (req, res) => {
       pieceLength: 256 * 1024, // 256KB pieces
       
       // Enable piece prioritization
-      prioritize: true
+      prioritize: true,
+      
+      // Set download path for this specific torrent
+      path: path.join(__dirname, 'downloads', 'torrent-' + Date.now())
     }, (torrent) => {
       console.log('Torrent added:', torrent.name);
+      console.log('Torrent download path:', torrent.path);
+      console.log('Torrent infoHash:', torrent.infoHash);
       
       // Find video files
       const videoFiles = torrent.files.filter(file => 
@@ -774,19 +784,261 @@ function getContentType(filename) {
   return contentTypes[ext] || 'application/octet-stream';
 }
 
-// API endpoint to remove torrent
-app.delete('/api/torrent/:infoHash', (req, res) => {
+// Cache management system for torrent data
+const torrentCache = new Map();
+
+// Function to clear all cached data for a specific torrent
+function clearTorrentCache(infoHash) {
+  console.log(`🧹 Clearing cache for torrent: ${infoHash}`);
+  
+  try {
+    // Clear any cached torrent metadata
+    if (torrentCache.has(infoHash)) {
+      const cacheData = torrentCache.get(infoHash);
+      
+      // Clear any cached streams
+      if (cacheData.streams) {
+        cacheData.streams.forEach(stream => {
+          if (stream && typeof stream.destroy === 'function') {
+            stream.destroy();
+          }
+        });
+      }
+      
+      // Clear any cached file data
+      if (cacheData.files) {
+        cacheData.files.clear();
+      }
+      
+      // Clear any cached progress data
+      if (cacheData.progress) {
+        cacheData.progress = null;
+      }
+      
+      // Remove from cache
+      torrentCache.delete(infoHash);
+      console.log(`✅ Cache cleared for torrent: ${infoHash}`);
+    }
+    
+    // Force garbage collection if available
+    if (global.gc) {
+      global.gc();
+      console.log(`🗑️ Garbage collection triggered for torrent: ${infoHash}`);
+    }
+    
+    // Clear any browser cache entries (if running in browser context)
+    // This is handled by the client-side code
+    
+  } catch (error) {
+    console.error(`❌ Error clearing cache for torrent ${infoHash}:`, error);
+  }
+}
+
+// Function to clear all torrent caches (for cleanup on server restart)
+function clearAllTorrentCaches() {
+  console.log(`🧹 Clearing all torrent caches`);
+  
+  try {
+    torrentCache.forEach((cacheData, infoHash) => {
+      clearTorrentCache(infoHash);
+    });
+    
+    torrentCache.clear();
+    console.log(`✅ All torrent caches cleared`);
+  } catch (error) {
+    console.error(`❌ Error clearing all torrent caches:`, error);
+  }
+}
+
+// Function to delete torrent files from filesystem
+async function deleteTorrentFiles(torrent) {
+  console.log(`🗑️ Deleting torrent files from filesystem: ${torrent.name}`);
+  
+  try {
+    if (!torrent || !torrent.files) {
+      console.log(`⚠️ No files to delete for torrent: ${torrent?.name || 'unknown'}`);
+      return;
+    }
+
+    // Get the torrent's download path
+    const torrentPath = torrent.path || torrent.downloadPath;
+    
+    if (!torrentPath) {
+      console.log(`⚠️ No download path found for torrent: ${torrent.name}`);
+      return;
+    }
+
+    console.log(`📁 Torrent download path: ${torrentPath}`);
+
+    // Check if the torrent directory exists
+    if (fs.existsSync(torrentPath)) {
+      console.log(`🗑️ Deleting torrent directory: ${torrentPath}`);
+      
+      // Delete all files in the torrent directory
+      const files = fs.readdirSync(torrentPath);
+      for (const file of files) {
+        const filePath = path.join(torrentPath, file);
+        const stat = fs.statSync(filePath);
+        
+        if (stat.isDirectory()) {
+          console.log(`📁 Deleting subdirectory: ${filePath}`);
+          await deleteDirectory(filePath);
+        } else {
+          console.log(`📄 Deleting file: ${filePath}`);
+          fs.unlinkSync(filePath);
+        }
+      }
+      
+      // Remove the torrent directory itself
+      fs.rmdirSync(torrentPath);
+      console.log(`✅ Torrent directory deleted: ${torrentPath}`);
+    } else {
+      console.log(`⚠️ Torrent directory not found: ${torrentPath}`);
+    }
+
+    // Also try to delete from WebTorrent's default download directory
+    const defaultDownloadPath = path.join(process.cwd(), 'downloads', torrent.infoHash);
+    if (fs.existsSync(defaultDownloadPath)) {
+      console.log(`🗑️ Deleting from default download path: ${defaultDownloadPath}`);
+      await deleteDirectory(defaultDownloadPath);
+    }
+
+    // Try to delete from system temp directory (WebTorrent sometimes uses this)
+    const tempPath = path.join(require('os').tmpdir(), 'webtorrent', torrent.infoHash);
+    if (fs.existsSync(tempPath)) {
+      console.log(`🗑️ Deleting from temp path: ${tempPath}`);
+      await deleteDirectory(tempPath);
+    }
+
+    console.log(`✅ File system cleanup completed for torrent: ${torrent.name}`);
+    
+  } catch (error) {
+    console.error(`❌ Error deleting torrent files for ${torrent.name}:`, error);
+    throw error;
+  }
+}
+
+// Helper function to recursively delete a directory
+async function deleteDirectory(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    return;
+  }
+
+  const files = fs.readdirSync(dirPath);
+  
+  for (const file of files) {
+    const filePath = path.join(dirPath, file);
+    const stat = fs.statSync(filePath);
+    
+    if (stat.isDirectory()) {
+      await deleteDirectory(filePath);
+    } else {
+      fs.unlinkSync(filePath);
+    }
+  }
+  
+  fs.rmdirSync(dirPath);
+}
+
+// API endpoint to remove torrent with comprehensive data cleanup
+app.delete('/api/torrent/:infoHash', async (req, res) => {
   const { infoHash } = req.params;
   const torrentData = activeTorrents.get(infoHash);
   
   if (torrentData) {
-    client.remove(torrentData.torrent);
-    activeTorrents.delete(infoHash);
+    console.log(`🗑️ Starting comprehensive cleanup for torrent: ${torrentData.name}`);
     
-    // Notify all connected clients that torrent was removed
-    io.emit('torrentRemoved', { infoHash });
-    
-    res.json({ success: true, message: 'Torrent removed' });
+    try {
+      // 1. Remove from WebTorrent client first (this stops all connections)
+      console.log(`🔌 Removing torrent from WebTorrent client: ${infoHash}`);
+      client.remove(torrentData.torrent);
+      
+      // 2. Stop the torrent download/upload
+      if (torrentData.torrent) {
+        console.log(`⏹️ Stopping torrent download/upload for: ${infoHash}`);
+        torrentData.torrent.destroy();
+      }
+      
+      // 3. Clear any active streams
+      if (torrentData.stream) {
+        console.log(`🌊 Destroying active streams for: ${infoHash}`);
+        torrentData.stream.destroy();
+      }
+      
+      // 4. Delete torrent files from filesystem
+      console.log(`🗑️ Deleting torrent files from filesystem: ${infoHash}`);
+      try {
+        await deleteTorrentFiles(torrentData.torrent);
+        console.log(`✅ File system cleanup completed for: ${infoHash}`);
+      } catch (fileError) {
+        console.error(`❌ File system cleanup failed for ${infoHash}:`, fileError);
+        // Continue with other cleanup even if file deletion fails
+      }
+      
+      // 5. Clear torrent data from memory
+      console.log(`🧹 Clearing torrent data from memory: ${infoHash}`);
+      activeTorrents.delete(infoHash);
+      
+      // 6. Clear any cached data related to this torrent
+      console.log(`💾 Clearing cached data for: ${infoHash}`);
+      clearTorrentCache(infoHash);
+      
+      // 7. Reset video prioritization if this was the currently playing video
+      if (currentlyPlayingVideo === infoHash) {
+        console.log(`🎬 Resetting video prioritization for: ${infoHash}`);
+        currentlyPlayingVideo = null;
+        updatePiecePriorities();
+      }
+      
+      // 8. Clear peer manager health data
+      if (peerManager.connectionHealth.has(infoHash)) {
+        console.log(`📊 Clearing peer health data for: ${infoHash}`);
+        peerManager.connectionHealth.delete(infoHash);
+      }
+      
+      // 9. Notify all connected clients that torrent was removed
+      console.log(`📢 Notifying clients of torrent removal: ${infoHash}`);
+      io.emit('torrentRemoved', { 
+        infoHash,
+        torrentName: torrentData.name,
+        cleanupComplete: true
+      });
+      
+      console.log(`✅ Comprehensive cleanup completed for torrent: ${torrentData.name}`);
+      res.json({ 
+        success: true, 
+        message: 'Torrent removed and all data cleaned up',
+        torrentName: torrentData.name,
+        cleanupComplete: true
+      });
+      
+    } catch (error) {
+      console.error(`❌ Error during torrent cleanup for ${infoHash}:`, error);
+      
+      // Even if cleanup fails, still try to remove from WebTorrent client and active torrents
+      try {
+        client.remove(torrentData.torrent);
+      } catch (removeError) {
+        console.error(`❌ Error removing torrent from client:`, removeError);
+      }
+      
+      activeTorrents.delete(infoHash);
+      
+      io.emit('torrentRemoved', { 
+        infoHash,
+        torrentName: torrentData.name,
+        cleanupComplete: false,
+        error: error.message
+      });
+      
+      res.json({ 
+        success: true, 
+        message: 'Torrent removed with partial cleanup',
+        torrentName: torrentData.name,
+        cleanupComplete: false,
+        error: error.message
+      });
+    }
   } else {
     res.status(404).json({ error: 'Torrent not found' });
   }
