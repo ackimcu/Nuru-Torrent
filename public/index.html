@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nuru Torrent Streamer</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <i class="fas fa-play-circle"></i>
+                <h1>Nuru Torrent Streamer</h1>
+            </div>
+            <div class="status-indicator">
+                <span class="status-dot" id="connectionStatus"></span>
+                <span id="connectionText">Connecting...</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Torrent Input Section -->
+            <section class="torrent-input-section">
+                <div class="input-container">
+                    <h2>Stream Torrents Instantly</h2>
+                    <p>Paste a magnet link below to start streaming without downloading</p>
+                    
+                    <div class="input-group">
+                        <div class="magnet-input-wrapper">
+                            <i class="fas fa-link"></i>
+                            <input 
+                                type="text" 
+                                id="magnetInput" 
+                                placeholder="magnet:?xt=urn:btih:..."
+                                autocomplete="off"
+                            >
+                        </div>
+                        <button id="addTorrentBtn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i>
+                            Add Torrent
+                        </button>
+                    </div>
+                    
+                    <div class="example-links">
+                        <p>Example magnet links:</p>
+                        <div class="example-link" onclick="fillExample('magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel&tr=udp%3A%2F%2Fexplodie.org%3A6969&tr=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969&tr=udp%3A%2F%2Ftracker.empire-js.us%3A1337&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337&tr=wss%3A%2F%2Ftracker.btorrent.xyz&tr=wss%3A%2F%2Ftracker.fastcast.nz&tr=wss%3A%2F%2Ftracker.openwebtorrent.com')">
+                            <i class="fas fa-film"></i>
+                            Sintel (Sample Video)
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Video Player Section -->
+            <section class="video-section" id="videoSection" style="display: none;">
+                <div class="video-container">
+                    <video 
+                        id="videoPlayer" 
+                        controls 
+                        preload="metadata"
+                        poster="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwIiBoZWlnaHQ9IjQ1MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMzMzIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIyNCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk5vIFZpZGVvIFNlbGVjdGVkPC90ZXh0Pjwvc3ZnPg=="
+                    >
+                        Your browser does not support the video tag.
+                    </video>
+                    
+                    <div class="video-overlay" id="videoOverlay">
+                        <div class="loading-spinner">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <p>Loading video...</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="video-info">
+                    <h3 id="videoTitle">No video selected</h3>
+                    <div class="video-stats">
+                        <span id="videoSize">-</span>
+                        <span id="videoProgress">-</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- File Manager Section -->
+            <section class="file-manager-section" id="fileManagerSection" style="display: none;">
+                <div class="file-manager-header">
+                    <h3>File Manager</h3>
+                    <div class="file-manager-actions">
+                        <button class="btn btn-small" id="toggleFileManager">
+                            <i class="fas fa-times"></i> Close
+                        </button>
+                    </div>
+                </div>
+                <div class="file-manager-content">
+                    <div class="file-manager-sidebar">
+                        <h4>Torrents</h4>
+                        <div class="torrent-selector" id="torrentSelector">
+                            <!-- Torrents will be populated here -->
+                        </div>
+                    </div>
+                    <div class="file-manager-main">
+                        <div class="file-manager-toolbar">
+                            <div class="file-path" id="filePath">
+                                <i class="fas fa-folder"></i>
+                                <span>Select a torrent to browse files</span>
+                            </div>
+                            <div class="file-actions">
+                                <button class="btn btn-small" id="refreshFiles">
+                                    <i class="fas fa-sync-alt"></i> Refresh
+                                </button>
+                            </div>
+                        </div>
+                        <div class="file-list" id="fileList">
+                            <div class="empty-state">
+                                <i class="fas fa-folder-open"></i>
+                                <p>No files to display</p>
+                                <small>Select a torrent to browse its files</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Torrent List Section -->
+            <section class="torrent-list-section">
+                <div class="torrent-list-header">
+                    <h3>Active Torrents</h3>
+                    <button class="btn btn-small btn-primary" id="openFileManager">
+                        <i class="fas fa-folder-open"></i> File Manager
+                    </button>
+                </div>
+                <div class="torrent-list" id="torrentList">
+                    <div class="empty-state">
+                        <i class="fas fa-cloud-download-alt"></i>
+                        <p>No active torrents</p>
+                        <small>Add a magnet link to start streaming</small>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2024 Nuru Torrent Streamer - Stream torrents without downloading</p>
+        </footer>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Scripts -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
